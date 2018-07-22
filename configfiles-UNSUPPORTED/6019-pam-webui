@@ -1,0 +1,40 @@
+# SOF-ELK Configuration File
+#
+# The purpose of this filter is to handle pam webui authentication messages.
+#   TODO 1: Extract out the rhost as its own field
+#   TODO 2: Comply with instructions:
+#       All IP addresses pulled via grok must be in a field with a name formatted as such: _ip or <use_case>_ip
+#           Examples: source_ip, destination_ip, relay_ip, answer_ip
+#       All IP addresses must be enriched with the GeoIP location and ASN filters (see existing files for examples)
+#       All IP addresses must be added to the "ips" array field (see existing files for examples)
+#   TODO 3: Figure out whether or not this can be part of a processing chain; do I need to reuse so much?
+
+# I have even done live testing. I dunno wtf is going on.
+
+filter {
+  # PAM authentication messages
+  if [type] == "syslog" {
+    if [message] =~ /^pam_*/ {
+      grok {
+        match => [ "message", "%{WORD:pam_module}\(%{DATA:pam_service}:%{WORD:pam_sessiontype}\): %{GREEDYDATA:message_remainder}" ]
+
+        add_tag => [ "got_pam", "parse_done" ]
+        tag_on_failure => [ "gpfail_pam" ]
+      }
+    }
+
+    if [message_remainder] {
+      grok {
+        match => ["message_remainder", "%{WORD:pam_auth_status}; logname=%{WORD:pam_logname} uid=%{WORD:pam_uid} euid=%{WORD:pam_euid} tty=%{WORD:pam_tty} ruser=%{WORD:pam_ruser} rhost=%{WORD:pam_rhost_ip} ]
+        match => ["message_remainder", "%{WORD:pam_auth_status}; logname=%{WORD:pam_logname} uid=%{WORD:pam_uid} euid=%{WORD:pam_euid} tty=%{WORD:pam_tty} ruser=%{WORD:pam_ruser} rhost=%{WORD:pam_rhost_ip} user=%{WORD:pam_failed_user}" ]
+        match => [ "message_remainder", "session %{WORD:pam_event} for user %{USER:pam_destusername}(?: by \(uid=%{INT:pam_sourceuid}\))?" ]
+        match => [ "message_remainder", "error retrieving information about user %{USER:user}"]
+      }
+    }
+    if [message_remainder] {
+      mutate {
+        remove_field => [ "message_remainder" ]
+      }
+    }
+  }
+}
